@@ -336,6 +336,28 @@ function appendSessionFilters(url: string, options: SessionQueryOptions): string
 
 export const api = {
   buildWsUrl,
+  speak: (text: string, profile = getManagementProfile()) =>
+    fetchJSON<{ ok: boolean; data_url: string }>(
+      appendProfileParam("/api/audio/speak", profile),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      },
+    ),
+  transcribe: (audioBase64: string, mimeType = "audio/webm", profile = getManagementProfile()) =>
+    fetchJSON<{ text: string; confidence?: number; language?: string }>(
+      appendProfileParam("/api/audio/transcribe", profile),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio: audioBase64, mime_type: mimeType }),
+      },
+    ),
+  getVoiceConfig: (profile = getManagementProfile()) =>
+    fetchJSON<{ ok: boolean; stt: Record<string, unknown>; tts: Record<string, unknown> }>(
+      appendProfileParam("/api/audio/voice-config", profile),
+    ),
   getStatus: () => fetchJSON<StatusResponse>("/api/status"),
   /**
    * Identity probe for the dashboard auth gate (Phase 7).

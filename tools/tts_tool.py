@@ -1745,6 +1745,9 @@ async def _generate_edge_tts(text: str, output_path: str, tts_config: Dict[str, 
     if speed != 1.0:
         pct = round((speed - 1.0) * 100)
         kwargs["rate"] = f"{pct:+d}%"
+    pitch = edge_config.get("pitch")
+    if pitch:
+        kwargs["pitch"] = str(pitch)
 
     communicate = _edge_tts.Communicate(text, **kwargs)
     await communicate.save(output_path)

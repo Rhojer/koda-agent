@@ -1,3 +1,4 @@
+import { JarvisVoiceWidget } from "@/components/JarvisVoiceWidget";
 /**
  * ChatSidebar — structured-events panel that sits next to the xterm.js
  * terminal in the dashboard Chat tab.
@@ -92,6 +93,8 @@ interface ChatSidebarProps {
   className?: string;
   onDashboardNewSessionRequest?: () => void;
   onSessionTitleChange?: (title: string | null) => void;
+  onSendMessage?: (message: string) => void;
+  lastAssistantMessage?: string;
 }
 
 /** Build the ``session.create`` params for the sidecar session.
@@ -115,6 +118,8 @@ export function ChatSidebar({
   className,
   onDashboardNewSessionRequest,
   onSessionTitleChange,
+  onSendMessage,
+  lastAssistantMessage,
 }: ChatSidebarProps) {
   // `version` bumps on reconnect; gw is derived so we never call setState
   // for it inside an effect (React 19's set-state-in-effect rule). The
@@ -457,6 +462,11 @@ export function ChatSidebar({
         className,
       )}
     >
+      <JarvisVoiceWidget
+        onSendMessage={onSendMessage}
+        lastAssistantMessage={lastAssistantMessage}
+      />
+
       <Card className="flex items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="text-display text-xs tracking-wider text-text-tertiary">

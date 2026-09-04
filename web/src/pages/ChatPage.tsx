@@ -210,6 +210,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // In gated (OAuth) mode the server intentionally omits the session token —
   // the dashboard API layer authenticates the WS via a single-use ticket,
   // so a missing token there is expected, not an error.
+  const [lastAssistantMsg, setLastAssistantMsg] = useState<string>("");
   const [banner, setBanner] = useState<string | null>(() =>
     typeof window !== "undefined" &&
     !window.__HERMES_SESSION_TOKEN__ &&
@@ -487,6 +488,17 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     return () => setEnd(null);
   }, [isActive, narrow, mobilePanelOpen, modelToolsLabel, setEnd]);
 
+  const handleSendPtyMessage = useCallback((msg: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(msg);
+    setTimeout(() => {
+      const s = wsRef.current;
+      if (s && s.readyState === WebSocket.OPEN) s.send("\r");
+    }, 50);
+    termRef.current?.focus();
+  }, []);
+
   const handleCopyLast = () => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -601,6 +613,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         // Clipboard API is unavailable (plain-HTTP deployments) or when the
         // write is rejected — e.g. the OSC 52 response arriving outside the
         // original keydown event's activation ("user gesture" requirement).
+        setLastAssistantMsg(text);
         void copyTextToClipboard(text).then((copied) => {
           if (!copied) {
             console.warn("[dashboard clipboard] OSC 52 write failed");
@@ -1789,6 +1802,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                 profile={scopedProfile}
                 onDashboardNewSessionRequest={startFreshDashboardChat}
                 onSessionTitleChange={handleSessionTitleChange}
+                onSendMessage={handleSendPtyMessage}
+                lastAssistantMessage={lastAssistantMsg}
               />
             </div>
             <ChatSessionList
@@ -1961,6 +1976,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                 profile={scopedProfile}
                 onDashboardNewSessionRequest={startFreshDashboardChat}
                 onSessionTitleChange={handleSessionTitleChange}
+                onSendMessage={handleSendPtyMessage}
+                lastAssistantMessage={lastAssistantMsg}
               />
             </div>
 

@@ -5603,6 +5603,135 @@ async def speak_text(payload: TTSSpeakRequest, profile: Optional[str] = None):
     }
 
 
+
+class ChatPayload(BaseModel):
+    message: Optional[str] = None
+    text: Optional[str] = None
+    prompt: Optional[str] = None
+    voice: Optional[str] = None
+    synthesize_speech: Optional[bool] = False
+
+
+@app.post("/api/chat")
+async def handle_web_chat(payload: ChatPayload, profile: Optional[str] = None):
+    """Execute a chat prompt with all Hermes skills & tools, with Koda voice audio."""
+    prompt = (payload.message or payload.text or payload.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    voice_id = (payload.voice or "es-US-AlonsoNeural").strip()
+    synthesize = payload.synthesize_speech if payload.synthesize_speech is not None else True
+
+    response_text = ""
+    audio_data_url = None
+    loop = asyncio.get_running_loop()
+
+    def _get_host_ip():
+        host = "127.0.0.1"
+        try:
+            with open("/etc/resolv.conf") as f:
+                for line in f:
+                    if line.startswith("nameserver"):
+                        host = line.split()[1]
+                        break
+        except Exception:
+            pass
+        return host
+
+    def _run_turn():
+        # First attempt full Hermes agent turn (uses all skills, tools, MCP)
+        try:
+            from hermes_cli.oneshot import _run_agent
+            with _config_profile_scope(profile):
+                resp, _ = _run_agent(prompt)
+                if resp and str(resp).strip():
+                    return str(resp)
+        except Exception as e_agent:
+            _log.warning("Agent execution error: %s", e_agent)
+            
+        # Fallback to direct Ollama if running
+        try:
+            import urllib.request, json
+            host_ip = _get_host_ip()
+            soul_text = "Eres Koda, un niño inteligente y amigable de 12 años con acento latinoamericano."
+            soul_path = "/home/descon/.hermes/SOUL.md"
+            if os.path.exists(soul_path):
+                try:
+                    soul_text = open(soul_path, "r", encoding="utf-8").read().strip()
+                except Exception:
+                    pass
+            url = f"http://{host_ip}:11434/v1/chat/completions"
+            req_body = json.dumps({
+                "model": "llama3.2:3b",
+                "messages": [
+                    {"role": "system", "content": soul_text},
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": 600,
+                "temperature": 0.7
+            }).encode("utf-8")
+            req = urllib.request.Request(url, data=req_body, headers={"Content-Type": "application/json"})
+            res = urllib.request.urlopen(req, timeout=30)
+            data = json.loads(res.read().decode())
+            return data["choices"][0]["message"]["content"].strip()
+        except Exception as e_ollama:
+            _log.warning("Ollama fallback error: %s", e_ollama)
+
+        return "¡Hola! No pude procesar la consulta con el modelo seleccionado. Revisa tu clave de API de Gemini o que Ollama esté activo."
+
+    try:
+        response_text = await loop.run_in_executor(None, _run_turn)
+    except Exception as exc:
+        _log.exception("Chat handler error: %s", exc)
+        response_text = f"¡Ups! Hubo un error al procesar el mensaje: {exc}"
+
+    if not response_text or not str(response_text).strip():
+        response_text = "¡Listo! Procesado con éxito."
+
+    # Synthesize speech using Edge TTS with Koda voice
+    if synthesize and response_text:
+        try:
+            from tools.tts_tool import text_to_speech_tool, _load_tts_config
+            import re
+            
+            clean_text = re.sub(r'```[\s\S]*?```', ' Bloque de código. ', str(response_text))
+            clean_text = re.sub(r'[`#*_~>\[\]]', '', clean_text)
+            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+            
+            if clean_text:
+                def _speak():
+                    with _config_profile_scope(profile):
+                        cfg = _load_tts_config()
+                        if 'edge' in cfg:
+                            cfg['edge']['voice'] = voice_id
+                            cfg['edge']['pitch'] = '+32Hz'
+                        return text_to_speech_tool(clean_text)
+
+                tts_json = await loop.run_in_executor(None, _speak)
+                tts_res = json.loads(tts_json) if isinstance(tts_json, str) else tts_json
+                if tts_res.get("success") and tts_res.get("file_path"):
+                    fp = tts_res["file_path"]
+                    if os.path.isfile(fp):
+                        with open(fp, "rb") as fh:
+                            ab = fh.read()
+                        try:
+                            os.unlink(fp)
+                        except OSError:
+                            pass
+                        encoded = base64.b64encode(ab).decode("ascii")
+                        audio_data_url = f"data:audio/mpeg;base64,{encoded}"
+        except Exception as tts_err:
+            _log.warning("Chat audio synthesis error: %s", tts_err)
+
+    return {
+        "ok": True,
+        "reply": response_text,
+        "response": response_text,
+        "audio_url": audio_data_url,
+    }
+
+
+
 def _split_text_for_speak_stream(text: str, cap: int) -> list:
     """Split *text* into provider-cap-sized pieces on sentence boundaries.
 
