@@ -190,8 +190,7 @@ and read the `info: stats:` line to see the counts before picking a number.
 
 ## Pitfalls
 
-- **Descarga y verificación propia:** Cada vez que se sugiera o consulte una URL o antecedente externo, el agente deberá descargar, extraer y contrastar el texto real de la fuente para garantizar que la información citada coincida exactamente con lo reportado por los autores originales, evitando discrepancias.
-  not reconstructed from the draft — that reintroduces exactly the hallucinated
+- **Descarga y verificación propia:** Cada vez que se sugiera o consulte una URL o antecedente externo, el agente deberá descargar, extraer y contrastar el texto real de la fuente para garantizar que la información citada coincida exactamente con lo reportado por los autores originales, evitando discrepancias. Este paso es INDISPENSABLE para work de alta precisión médica/académico. No reconstruir desde el draft — eso reintroduce exactamente el
   -URL risk the numbering removes.
 - **Renumbering mid-task.** Never hand-edit ids in a draft. Ids are ledger
   identities; if a draft cites `[4]`, `[4]` must stay that source. Run `reset`
