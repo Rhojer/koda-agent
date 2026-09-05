@@ -84,6 +84,63 @@ The user's thesis blueprint often arrives as a `.pptx` maquette (5-7 slides cove
 4. When overshooting, apply the decision tree above.
 5. Before delivering the file, run `verify_paragraphs.sh` on the full file and include the output in your reply as evidence.
 
+## Post-Writing Citation Verification (mandatory after every draft)
+
+A paragraph that satisfies the 5-11 rule can still be **wrong** if a `[Autor]` citation doesn't actually exist in any PDF or if the cited statistic doesn't match what the source says. Two failure modes discovered in real sessions:
+
+1. **Ghost citations** — the author doesn't appear in any workspace PDF.
+2. **Misattributed statistics** — the author exists, but the exact number (%, ml, AUC) is from a different source.
+
+After any write/patch that introduces `[Autor]` citations, run the citation audit loop:
+
+```bash
+# 1. Extract every distinct [Autor] used in the draft
+grep -oE '\[[A-ZÁÉÍÓÚÑ][A-Za-záéíóúñÁÉÍÓÚÑ -]+\]' chapter.txt | sort -u > citas_usadas.txt
+
+# 2. For each, search every PDF in the workspace (uses pdftotext layout)
+for pdf in /path/to/workspace/*.pdf; do
+    pdftotext -layout "$pdf" - | grep -l -i "<Autor>"
+done
+```
+
+Or the inline Python equivalent (returns the page number where the citation first appears):
+
+```python
+import subprocess, os, re
+PDFS_DIR = "/path/to/workspace"
+autores = ["López González", "Vega Ruiz", "Rivas-Perdomo"]
+for pdf in os.listdir(PDFS_DIR):
+    if not pdf.endswith(".pdf"): continue
+    r = subprocess.run(["pdftotext","-layout", os.path.join(PDFS_DIR,pdf), "-"],
+                       capture_output=True, text=True)
+    paginas = r.stdout.split("\f")
+    for n, contenido in enumerate(paginas, 1):
+        for a in autores:
+            if a in contenido:
+                print(f"  {pdf} p.{n}: {a}")
+```
+
+Then for each statistic in the draft (%, ml, AUC, mmHg, lpm) do a **separate** search using **both** decimal separators (comma AND point) — many Spanish-language sources write "1,000 ml" not "1.000 ml".
+
+## Common pitfalls when reading the draft back
+
+- **`read_file` output is line-numbered**: it returns `"LINE_NUM|CONTENT"` per line. A naive `content.split("\n\n")` fails because every line carries a numeric prefix and a `|`. Strip the prefix before splitting:
+
+  ```python
+  raw = read_file(path).content
+  lineas = raw.split("\n")
+  limpio = "\n".join(l.split("|", 1)[1] if "|" in l else l for l in lineas)
+  parrafos = [p.strip() for p in limpio.split("\n\n") if p.strip()]
+  ```
+
+- **`write_file`'s "verified: true" ≠ rule compliance**: it confirms the bytes landed, not that paragraphs are 5-11 lines or that citations are correct. Always re-run `verify_paragraphs.sh`.
+
+- **Decimal separator trap**: Spanish sources usually use comma ("1,000 ml", "43,7%"). If your search with the period version returns nothing, retry with comma. Same for AUC decimals ("72,5" vs "72.5").
+
+## Interpreting vs transcribing citations
+
+When the source says "X **affected** 43.7% of patients" and you write "X **explained** 43.7% of cases", that's a **factual** reframe even if the number matches. Strict evaluators will mark it. Rule: transcribe the source's verb, not paraphrase it. If the paraphrase is structurally necessary (e.g. you need a transitive verb for the sentence), propose the change to the user before writing.
+
 ## Maintenance
 
 Patch this skill whenever the user tightens the length envelope, changes the citation style, or adds a new maquette format. Reference: `tesis-grado` and `evidence-grounded-writing` cover the higher-level thesis rules — this skill is the layout/format companion.
