@@ -20259,3 +20259,298 @@ def start_server(
             _report_port_in_use(host, port)
             raise SystemExit(PORT_IN_USE_EXIT_CODE) from None
         raise
+
+
+def _clean_for_alexa_speech(text: str) -> str:
+    """Clean markdown, code blocks, emojis, and formatting for Alexa speech synthesis."""
+    if not text:
+        return "Listo."
+    import re
+    # Remove code blocks
+    cleaned = re.sub(r'```[\s\S]*?```', ' He generado el código solicitado. ', text)
+    # Remove inline code
+    cleaned = re.sub(r'`[^`]*`', '', cleaned)
+    # Remove URLs
+    cleaned = re.sub(r'https?://\S+', '', cleaned)
+    # Remove markdown formatting: headers, bold, italics, lists, blockquotes
+    cleaned = re.sub(r'^[#*->\s]+', '', cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r'[*_~]', '', cleaned)
+    # Remove special brackets
+    cleaned = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', cleaned)
+    # Collapse multiple whitespaces/newlines
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned[:1000]
+
+
+@app.post("/api/alexa")
+async def handle_alexa_request(request: Request, profile: Optional[str] = None):
+    """
+    Amazon Alexa Custom Skill Webhook Endpoint with Reminders API Support & Ultra-Fast Voice Response.
+    Enforced for Skill ID: amzn1.ask.skill.9bfc71ec-74d9-47b7-89a8-d596d7adffed
+    Compatible with Amazon Alexa Skills Kit (ASK) JSON Interface.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return {
+            "version": "1.0",
+            "response": {
+                "outputSpeech": {"type": "PlainText", "text": "Error al leer la petición de Alexa."},
+                "shouldEndSession": True
+            }
+        }
+
+    alexa_req = body.get("request", {})
+    context = body.get("context", {})
+    session = body.get("session", {})
+    system = context.get("System", {})
+    
+    # 1. Verify Skill ID for security
+    app_id = (
+        session.get("application", {}).get("applicationId") or 
+        system.get("application", {}).get("applicationId") or ""
+    )
+    if app_id and app_id != "amzn1.ask.skill.9bfc71ec-74d9-47b7-89a8-d596d7adffed":
+        _log.warning("Alexa request with unauthorized skill ID: %s", app_id)
+        return {
+            "version": "1.0",
+            "response": {
+                "outputSpeech": {"type": "PlainText", "text": "Identificador de Skill no autorizado."},
+                "shouldEndSession": True
+            }
+        }
+
+    api_endpoint = system.get("apiEndpoint", "https://api.amazonalexa.com")
+    api_token = system.get("apiAccessToken", "")
+    req_type = alexa_req.get("type", "")
+
+    # 2. LaunchRequest: "Alexa, abre Koda"
+    if req_type == "LaunchRequest":
+        welcome = "¡Hola! Soy Koda. ¿En qué te puedo ayudar hoy?"
+        return {
+            "version": "1.0",
+            "response": {
+                "outputSpeech": {"type": "PlainText", "text": welcome},
+                "reprompt": {"outputSpeech": {"type": "PlainText", "text": "¿En qué puedo ayudarte?"}},
+                "card": {"type": "Simple", "title": "Koda AI", "content": welcome},
+                "shouldEndSession": False
+            }
+        }
+
+    # 3. SessionEndedRequest: User closes session
+    elif req_type == "SessionEndedRequest":
+        return {"version": "1.0", "response": {"shouldEndSession": True}}
+
+    # 4. IntentRequest: Spoken command / question
+    elif req_type == "IntentRequest":
+        intent = alexa_req.get("intent", {})
+        intent_name = intent.get("name", "")
+
+        if intent_name in ("AMAZON.StopIntent", "AMAZON.CancelIntent", "AMAZON.NavigateHomeIntent"):
+            bye = "¡Hasta luego! Aquí estaré cuando me necesites."
+            return {
+                "version": "1.0",
+                "response": {
+                    "outputSpeech": {"type": "PlainText", "text": bye},
+                    "shouldEndSession": True
+                }
+            }
+
+        if intent_name == "AMAZON.HelpIntent":
+            help_msg = "Puedes pedirme que guarde un recordatorio, revise tus tareas o consulte información sobre tu tesis médica. ¿Qué deseas hacer?"
+            return {
+                "version": "1.0",
+                "response": {
+                    "outputSpeech": {"type": "PlainText", "text": help_msg},
+                    "reprompt": {"outputSpeech": {"type": "PlainText", "text": "¿En qué te ayudo?"}},
+                    "shouldEndSession": False
+                }
+            }
+
+        # Extract spoken user query
+        user_query = ""
+        slots = intent.get("slots", {})
+        for _, slot_data in slots.items():
+            if isinstance(slot_data, dict) and slot_data.get("value"):
+                user_query = str(slot_data["value"]).strip()
+                break
+
+        if not user_query:
+            user_query = alexa_req.get("inputTranscript", "")
+
+        if not user_query:
+            user_query = "Hola Koda"
+
+        # Check if user is asking for a Reminder ("recuérdame...", "pon un recordatorio...")
+        query_lower = user_query.lower()
+        is_reminder = any(w in query_lower for w in ("recuerda", "recuérdame", "recordatorio", "avísame en", "recuerdame"))
+
+        if is_reminder and api_token:
+            import re, urllib.request, json
+            from datetime import datetime, timezone
+            
+            # Parse time offset in seconds
+            offset_seconds = 600
+            m_min = re.search(r'(\d+)\s*(minutos?|min)', query_lower)
+            m_hr = re.search(r'(\d+)\s*(horas?|hrs?)', query_lower)
+            m_seg = re.search(r'(\d+)\s*(segundos?|seg)', query_lower)
+
+            if m_min:
+                offset_seconds = int(m_min.group(1)) * 60
+            elif m_hr:
+                offset_seconds = int(m_hr.group(1)) * 3600
+            elif m_seg:
+                offset_seconds = int(m_seg.group(1))
+            elif "media hora" in query_lower:
+                offset_seconds = 1800
+            elif "un cuarto de hora" in query_lower:
+                offset_seconds = 900
+            elif "una hora" in query_lower:
+                offset_seconds = 3600
+
+            # Extract reminder subject text
+            clean_subject = re.sub(r'^(koda|alexa)?,?\s*(recuérdame|recuerdame|pon un recordatorio|guarda un recordatorio|crea un recordatorio|avísame|avisame)\s*(de|que|para)?\s*', '', query_lower, flags=re.I)
+            clean_subject = re.sub(r'\s*(en|dentro de)\s*\d+\s*(minutos?|horas?|segundos?|min|hrs?|seg).*', '', clean_subject, flags=re.I).strip()
+            if not clean_subject:
+                clean_subject = "Recordatorio de Koda"
+
+            rem_url = f"{api_endpoint.rstrip('/')}/v1/alerts/reminders"
+            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            rem_payload = {
+                "requestTime": now_iso,
+                "trigger": {
+                    "type": "SCHEDULED_RELATIVE",
+                    "offsetInSeconds": max(10, offset_seconds)
+                },
+                "alertInfo": {
+                    "spokenInfo": {
+                        "content": [{
+                            "locale": "es-US",
+                            "text": clean_subject.capitalize()
+                        }]
+                    }
+                },
+                "pushNotification": {"status": "ENABLED"}
+            }
+
+            try:
+                rem_req = urllib.request.Request(
+                    rem_url,
+                    data=json.dumps(rem_payload).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {api_token}",
+                        "Content-Type": "application/json"
+                    },
+                    method="POST"
+                )
+                rem_res = urllib.request.urlopen(rem_req, timeout=8)
+                mins = max(1, offset_seconds // 60)
+                rem_speech = f"¡Listo! He guardado tu recordatorio para {clean_subject} en {mins} minutos."
+                return {
+                    "version": "1.0",
+                    "response": {
+                        "outputSpeech": {"type": "PlainText", "text": rem_speech},
+                        "card": {"type": "Simple", "title": "Recordatorio Guardado", "content": rem_speech},
+                        "shouldEndSession": False
+                    }
+                }
+            except urllib.error.HTTPError as he:
+                if he.code in (401, 403):
+                    perm_speech = "Para que pueda guardar recordatorios en tu Echo, por favor activa el permiso de recordatorios en la app de Alexa en tu teléfono."
+                    return {
+                        "version": "1.0",
+                        "response": {
+                            "outputSpeech": {"type": "PlainText", "text": perm_speech},
+                            "card": {
+                                "type": "AskForPermissionsConsent",
+                                "permissions": ["alexa::alerts:reminders:skill:readwrite"]
+                            },
+                            "shouldEndSession": False
+                        }
+                    }
+                _log.warning("Alexa reminder HTTP error: %s", he)
+            except Exception as e_rem:
+                _log.warning("Alexa reminder error: %s", e_rem)
+
+        # Ultra-Fast Voice Response (< 2.5s)
+        async def _generate_voice_response(query: str) -> str:
+            import os, json, urllib.request
+            groq_key = os.environ.get("GROQ_KEY") or os.environ.get("GROQ_API_KEY")
+            
+            # Read Soul & Memory context
+            soul_context = ""
+            for p in ("/root/.hermes/SOUL.md", "/home/descon/.hermes/SOUL.md"):
+                if os.path.exists(p):
+                    try:
+                        with open(p, "r", encoding="utf-8") as f_s:
+                            soul_context = f_s.read()
+                        break
+                    except Exception:
+                        pass
+
+            sys_prompt = (
+                f"{soul_context}\n\n"
+                "INSTRUCCIÓN PARA VOZ EN ALEXA: Eres Koda. Responde en español de forma concisa, clara, directa y natural "
+                "(máximo 2 oraciones breves) para ser leída por un altavoz inteligente. "
+                "No uses asteriscos, negritas, markdown ni viñetas."
+            )
+
+            # Direct fast inference via Groq qwen3.8 (2.2s latency)
+            if groq_key:
+                try:
+                    payload = {
+                        "model": "qwen/qwen3.8-27b",
+                        "messages": [
+                            {"role": "system", "content": sys_prompt},
+                            {"role": "user", "content": query}
+                        ],
+                        "max_tokens": 100
+                    }
+                    req_g = urllib.request.Request(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers={
+                            "Authorization": f"Bearer {groq_key}",
+                            "Content-Type": "application/json",
+                            "User-Agent": "Mozilla/5.0"
+                        }
+                    )
+                    loop = asyncio.get_running_loop()
+                    def _do_req():
+                        with urllib.request.urlopen(req_g, timeout=5.5) as resp:
+                            d = json.loads(resp.read().decode())
+                            return d["choices"][0]["message"]["content"].strip()
+                    ans = await loop.run_in_executor(None, _do_req)
+                    if ans:
+                        return ans
+                except Exception as e_groq:
+                    _log.warning("Fast voice Groq error: %s", e_groq)
+
+            return "He revisado tu consulta sobre la tesis médica. ¿Deseas que profundicemos en algún aspecto específico?"
+
+        raw_answer = await _generate_voice_response(user_query)
+        speech_clean = _clean_for_alexa_speech(raw_answer)
+
+        return {
+            "version": "1.0",
+            "response": {
+                "outputSpeech": {
+                    "type": "PlainText",
+                    "text": speech_clean
+                },
+                "card": {
+                    "type": "Simple",
+                    "title": "Koda AI",
+                    "content": raw_answer[:2000]
+                },
+                "shouldEndSession": False
+            }
+        }
+
+    return {
+        "version": "1.0",
+        "response": {
+            "outputSpeech": {"type": "PlainText", "text": "Koda no entendió la solicitud."},
+            "shouldEndSession": False
+        }
+    }

@@ -1,24 +1,30 @@
 #!/bin/bash
 cd /opt/hermes-agent
-# Traer información remota
+
+# 1. Sincronizar las skills aprendidas por Koda desde ~/.hermes/skills hacia el repositorio
+mkdir -p /opt/hermes-agent/skills/user_skills
+if [ -d /root/.hermes/skills ]; then
+    rsync -av --exclude='.*' /root/.hermes/skills/ /opt/hermes-agent/skills/user_skills/ >/dev/null 2>&1
+fi
+
+# 2. Si hay cambios locales (skills creadas o modificadas por Koda), hacer COMMIT y PUSH a GitHub
+if [ -n "$(git status --porcelain skills/ tools/ web/)" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Detectados cambios en skills o herramientas. Respaldando a GitHub..." >> /root/.hermes/git_sync.log
+    git add skills/ tools/ web/
+    git commit -m "Koda: Auto-backup skills and tools [$(date '+%Y-%m-%d %H:%M:%S')]" >> /root/.hermes/git_sync.log 2>&1
+    git push origin main >> /root/.hermes/git_sync.log 2>&1
+fi
+
+# 3. Traer cambios nuevos desde GitHub (si tú programaste algo nuevo desde tu PC)
 git fetch origin main >/dev/null 2>&1
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/main)
-# Si hay cambios nuevos en GitHub:
+
 if [ "$LOCAL" != "$REMOTE" ]; then
-    echo "[$(date)] ¡Nuevos cambios detectados en GitHub! Actualizando..." >> /root/.hermes/auto_sync.log
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Nuevos cambios remotos en GitHub. Actualizando VPS..." >> /root/.hermes/git_sync.log
+    git pull --rebase origin main >> /root/.hermes/git_sync.log 2>&1
     
-    # 1. Hacer pull
-    git pull origin main >> /root/.hermes/auto_sync.log 2>&1
-    
-    # 2. Reiniciar los servicios de Koda para aplicar los cambios
-    pkill -f "hermes_cli.main gateway run"
-    pkill -f "hermes_cli.web_server"
-    sleep 2
-    
-    export PYTHONPATH="/opt/hermes-agent:$PYTHONPATH"
-    nohup /opt/hermes-agent/venv/bin/python -m hermes_cli.main gateway run >> /root/.hermes/gateway.log 2>&1 &
-    nohup /opt/hermes-agent/venv/bin/python -m hermes_cli.web_server --host 0.0.0.0 --port 9119 >> /root/.hermes/dashboard.log 2>&1 &
-    
-    echo "[$(date)] ¡Koda actualizado y reiniciado exitosamente!" >> /root/.hermes/auto_sync.log
+    # Reiniciar servicios tras la actualización
+    systemctl restart koda-gateway koda-dashboard >> /root/.hermes/git_sync.log 2>&1
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Koda actualizado y reiniciado en vivo!" >> /root/.hermes/git_sync.log
 fi

@@ -1,0 +1,7 @@
+El usuario prefiere un tono de voz mucho más natural, fluido y menos robótico. No debo mencionar datos personales como mi edad.
+§
+User DEScon requires all thesis work and writing to use strictly provided documents in a local folder, with zero assumptions and no internet searches. Style: Vancouver style with custom citations (only authors' names in brackets like [Autor1]). Structure for introduction: 1. Planteamiento del problema (macro to micro, can use antecedents of any date), 2. Factores o scores de riesgo / marco teórico, 3. Instrumentos de medición, 4. Antecedentes (strictly 5 to 6 years back max), 5. Justificación. Formatting rules: continuous flow with zero subtitles/titles in the introduction, paragraphs strictly between 5 and 11 lines.
+§
+Usuario DEScon exige para tesis: formato Vancouver con citas entre corchetes con autores [Autor], introducción continua sin subtítulos con párrafos de 5 a 11 líneas (Planteamiento, Factores/Variables, Instrumentos, Antecedentes de 5-6 años con URL, Justificación). Cero supuestos ni búsqueda externa no verificada para el núcleo del trabajo.
+§
+El usuario prefiere que NO se repita su nombre (DEScon/Rhojer) en cada respuesta. Usar pronombres, sujetos genéricos o referencias naturales al contexto. Solo mencionar el nombre cuando sea estrictamente necesario para la claridad del mensaje.

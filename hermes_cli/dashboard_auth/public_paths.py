@@ -58,6 +58,7 @@ PUBLIC_API_PATHS: frozenset[str] = frozenset({
     # 401 no_cookie. The JWT — not this allowlist — is the security boundary.
     "/api/cron/fire",
     "/api/chat",
+    "/api/alexa",
     "/api/audio/speak",
     "/api/audio/transcribe",
     "/api/audio/voice-config",
