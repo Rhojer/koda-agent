@@ -120,3 +120,74 @@ workspace_compartido/
 4. Edit one card's page number to a wrong one — run `check` — expect 1 error pointing to the bad card.
 5. Run `strip-marks` — verify the .txt output has no `{{}}` and is paragraph-valid.
 6. Delete the output and rerun — confirm idempotency.
+
+## Long-session survival: prevent context-overflow auto-reset
+
+Evidence-traced writing sessions routinely exceed the model's
+context window because they accumulate: full PDF reads, citation
+card lookups, long draft files, and citation verification output.
+Two distinct interruption modes:
+
+| Mode | Trigger | User-visible message |
+|---|---|---|
+| **Context overflow** | Tokens cross window; lossy compressor can't shrink further | `Context length exceeded (N tokens). Cannot compress further. Session auto-reset…` |
+| **Network mid-stream cut** | Provider drops the connection while streaming a response | `The previous response was cut off by a network error mid-stream. Continue exactly where you left off.` |
+
+The mitigation discipline (validated in real thesis sessions, 2026-09):
+
+1. **Maintain a `checkpoint.md` in the workspace.** Plain markdown,
+   human-readable, updated at the end of every productive turn
+   with: current draft state, last verified card, pending
+   decisions, working agreements. Without this file a reset
+   destroys hours of in-progress work; with it, the next session
+   resumes in one read.
+2. **Focal PDF reads, never whole.** Use `pdftotext -f N -l N` or
+   `search_files` with a regex. Reading a 50-page PDF whole is
+   roughly the cost of 4–5 full responses; a regex for `43,7%`
+   over the same PDF costs ~1% and lands the answer.
+3. **Drafts on disk, not in chat.** The .txt is the source of
+   truth. Chat messages are working memory. Showing long drafts in
+   chat burns context on every follow-up turn.
+4. **One task per turn.** "Write the next paragraph" is one task.
+   Adding citation audit + checkpoint update to the same turn
+   dumps all three results back into context simultaneously.
+5. **Tune `compression.*` early.** Default `threshold: 0.5` is
+   conservative. For long sessions, lower to `0.3` and raise
+   `protect_last_n` to 30. Inspect with `hermes config get compression`.
+6. **Prefer paid/stable models for long sessions.** `:free` model
+   suffixes (e.g. `liquid/lfm-2.5-2.6b:free`) are the most common
+   cause of the mid-stream network reset — aggressive rate limits
+   cut responses without warning.
+
+The full recipe with copy-pasteable snippets lives in
+`references/long-session-survival.md`.
+
+## Verify user-suggested configs before applying
+
+When the user (or a tutorial) proposes a `config.yaml` change, look
+it up before running `hermes config set`. Several "official-looking"
+options are actually third-party plugins.
+
+**Verification procedure:**
+
+```bash
+# 1. Does the key exist in the running schema?
+hermes config get <key.path>
+
+# 2. If it does, what are the legal values?
+hermes config show | grep -A 5 "<key.path>"
+
+# 3. If it doesn't, is it a plugin reference?
+grep -r "<value>" /root/.hermes/skills/ 2>/dev/null
+```
+
+**Real example (2026-09):** user proposed
+`context.engine: "lcm"` thinking it was a built-in lossless
+compressor. Verification returned `null` for `context.engine` — the
+correct answer is that `lcm` is a third-party plugin (`hermes-lcm`
+on PyPI) requiring a separate install and
+`plugins.enabled: hermes-lcm`. Without all three, the change breaks
+context handling silently.
+
+The verify-first check and the full decision tree live in
+`references/verify-config-changes.md`.
