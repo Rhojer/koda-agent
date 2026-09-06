@@ -67,10 +67,19 @@ If ANY paragraph fails, do not deliver. Split/merge and re-run until all pass.
 
 The user's thesis blueprint often arrives as a `.pptx` maquette (5-7 slides covering portada, objetivos, metodología, instrumento, operacionalización). Do **not** require `python-pptx` — installation is a forbidden action in this environment. Use the **system-only fallback** in `references/extract-pptx-without-python-pptx.md` instead.
 
+## Existing Drafts: Append, Don't Overwrite (CRITICAL)
+
+`write_file` is not an editor — it is "replace the file with exactly this string." Using it to add a new section (justificación, conclusión, a new antecedentes block) to an existing draft **destroys everything that was there before.** This is the single most destructive pitfall in this skill and was the actual failure mode in the 2026-09-06 thesis session (6 KB of completed prose lost in one write).
+
+- For appending to an existing file: `terminal(cat >>)`, `execute_code` with `open(path,'a')`, or `patch(mode='replace')` with surrounding context.
+- For re-creating an existing file: read it fully with `read_file` first, then `write_file` the **complete** reconstructed content (old + new) in one shot.
+- See `references/append-vs-overwrite.md` for the full checklist, the safe patterns, and the recovery playbook.
+
 ## Anti-Patterns
 
 - ❌ Counting lines by paragraph length alone (a 900-char paragraph at 80 cols is 12 lines, not "1 paragraph = 1 line").
 - ❌ Visually inspecting a write_file output and declaring "OK" without re-reading with `read_file` + math.
+- ❌ **Using `write_file` to "add" a new section (justificación, antecedentes, conclusión) to an existing draft.** `write_file` **overwrites the entire file** — it is not an append. The user loses every paragraph that was there before. This is the single most destructive pitfall in this skill. See `references/append-vs-overwrite.md` for the mandatory tool choice and the recovery playbook.
 - ❌ Trimming a paragraph to fit 5-11 lines and silently losing a `[Autor]` citation.
 - ❌ Mixing "split into more paragraphs" with "merge into one" — pick one operation per turn.
 - ❌ Trying `pip install python-pptx` when the environment blocks it (the user has a standing no-install policy).
@@ -82,7 +91,8 @@ The user's thesis blueprint often arrives as a `.pptx` maquette (5-7 slides cove
 2. Align the draft's variables, objetivos numerados, criterios de inclusión with the maquette **verbatim**, in the order they appear on the slide (with the user's correction on numbering if any).
 3. Draft paragraph by paragraph. After each one, run the verification script.
 4. When overshooting, apply the decision tree above.
-5. Before delivering the file, run `verify_paragraphs.sh` on the full file and include the output in your reply as evidence.
+5. **Before every write that touches an existing draft, read the append-vs-overwrite reference (`references/append-vs-overwrite.md`).** Choosing the wrong tool here destroys the whole document and forces full reconstruction from context.
+6. Before delivering the file, run `verify_paragraphs.sh` on the full file and include the output in your reply as evidence.
 
 ## Post-Writing Citation Verification (mandatory after every draft)
 
